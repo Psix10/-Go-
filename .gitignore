@@ -1,0 +1,11 @@
+# Go binaries
+gateway/gateway
+ledger/ledger
+*.exe
+
+# IDE
+.idea/
+.vscode/
+
+# OS files
+.DS_Store

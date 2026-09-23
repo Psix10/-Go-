@@ -15,5 +15,5 @@ func main() {
 
 	goVersion := runtime.Version()
 	fmt.Println("3. Версия Go (через runtime):", goVersion)
-	fmt.
+
 }
