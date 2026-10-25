@@ -1,62 +1,40 @@
-# Gateway
+# Gateway и Ledger — тестирование
 
-HTTP-фасад над сервисом `ledger`. Все ответы — `Content-Type: application/json; charset=utf-8`.
-Ошибки возвращаются в едином формате: `{"error":"..."}`.
+## Запуск тестов
 
-## Эндпоинты
+Команды выполняются из папки gateway.
 
-| Метод | Путь               | Описание                            |
-|-------|--------------------|-------------------------------------|
-| GET   | `/ping`            | health-check (`pong`)               |
-| POST  | `/api/transactions`| создать транзакцию                  |
-| GET   | `/api/transactions`| список транзакций (или `[]`)        |
-| POST  | `/api/budgets`     | создать/обновить бюджет             |
-| GET   | `/api/budgets`     | список бюджетов (или `[]`)          |
+Все тесты:
 
-## Коды ответов
-
-- `201 Created` — успешное создание;
-- `200 OK` — успешный список;
-- `400 Bad Request` — ошибка валидации/JSON;
-- `409 Conflict` — `{"error":"budget exceeded"}`;
-- `500 Internal Server Error` — прочие ошибки.
-
-## Примеры cURL
-
-Создать транзакцию:
-
-```bash
-curl -X POST http://localhost:8080/api/transactions \
-  -H "Content-Type: application/json" \
-  -d '{"amount":450,"category":"еда","description":"ланч","date":"2025-09-10"}'
+```powershell
+go test ./...
 ```
 
-Список транзакций:
+Подробный запуск без кеша:
 
-```bash
-curl http://localhost:8080/api/transactions
+```powershell
+go test -v -count=1 ./...
 ```
 
-Создать бюджет:
+## Покрытие
 
-```bash
-curl -X POST http://localhost:8080/api/budgets \
-  -H "Content-Type: application/json" \
-  -d '{"category":"еда","limit":20000}'
+```powershell
+go test ./... -count=1 -cover -coverprofile=cover.out
+go tool cover -html=cover.out -o cover.html
+go tool cover -func=cover.out
 ```
 
-Список бюджетов:
+На момент проверки:
+- internal/ledger — 78.9%;
+- internal/api — 82.5%.
 
-```bash
-curl http://localhost:8080/api/budgets
-```
+## Что проверяется
 
-Проверить превышение бюджета (при лимите 1000 на «еда»):
-
-```bash
-curl -i -X POST http://localhost:8080/api/transactions \
-  -H "Content-Type: application/json" \
-  -d '{"amount":5000,"category":"еда","description":"ужин","date":"2025-09-11"}'
-# HTTP/1.1 409 Conflict
-# {"error":"budget exceeded"}
-```
+- Валидация транзакций и бюджетов.
+- Добавление транзакций в пределах бюджета.
+- Отказ при суммарном превышении бюджета.
+- Отсутствие сохранения отклонённых транзакций.
+- HTTP-эндпоинты создания и получения бюджетов и транзакций.
+- Коды ответов 201, 200, 400 и 409.
+- JSON-ответы и заголовок Content-Type.
+- Изоляция сценариев через Reset().

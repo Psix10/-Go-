@@ -1,0 +1,526 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>api: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">gateway/internal/api/dto.go (91.7%)</option>
+				
+				<option value="file1">gateway/internal/api/handlers.go (78.7%)</option>
+				
+				<option value="file2">gateway/internal/api/middleware.go (100.0%)</option>
+				
+				<option value="file3">gateway/internal/ledger/budget.go (61.0%)</option>
+				
+				<option value="file4">gateway/internal/ledger/transaction.go (95.8%)</option>
+				
+				<option value="file5">gateway/internal/ledger/validation.go (0.0%)</option>
+				
+				<option value="file6">gateway/main.go (0.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package api
+
+import (
+        "fmt"
+        "time"
+
+        "gateway/internal/ledger"
+)
+
+type CreateTransactionRequest struct {
+        Amount      float64 `json:"amount"`
+        Category    string  `json:"category"`
+        Description string  `json:"description"`
+        Date        string  `json:"date"`
+}
+
+type TransactionResponse struct {
+        ID          int     `json:"id"`
+        Amount      float64 `json:"amount"`
+        Category    string  `json:"category"`
+        Description string  `json:"description"`
+        Date        string  `json:"date"`
+}
+
+type CreateBudgetRequest struct {
+        Category string  `json:"category"`
+        Limit    float64 `json:"limit"`
+}
+
+type BudgetResponse struct {
+        Category string  `json:"category"`
+        Limit    float64 `json:"limit"`
+        Period   string  `json:"period"`
+}
+
+func (r CreateTransactionRequest) ToDomain() (ledger.Transaction, error) {
+        <span class="cov8" title="1">tx := ledger.Transaction{
+                Amount:      r.Amount,
+                Category:    r.Category,
+                Description: r.Description,
+</span>        }
+        <span class="cov8" title="1">if r.Date != "" </span>{
+                <span class="cov8" title="1">t, err := time.Parse("2006-01-02", r.Date)
+                if err != nil </span>{
+                        <span class="cov0" title="0">return ledger.Transaction{}, fmt.Errorf("invalid date %q, expected format YYYY-MM-DD", r.Date)
+</span>                }
+                <span class="cov8" title="1">tx.Date = t</span>
+        }
+        <span class="cov8" title="1">return tx, nil</span>
+}
+
+func FromDomainTransaction(t ledger.Transaction) TransactionResponse {
+        <span class="cov8" title="1">return TransactionResponse{
+                ID:          t.ID,
+                Amount:      t.Amount,
+                Category:    t.Category,
+                Description: t.Description,
+                Date:        t.Date.Format("2006-01-02"),
+</span>        }
+}
+
+func (r CreateBudgetRequest) ToDomain() ledger.Budget {
+        <span class="cov8" title="1">return ledger.Budget{
+                Category: r.Category,
+                Limit:    r.Limit,
+                Period:   "month",
+</span>        }
+}
+
+func FromDomainBudget(b ledger.Budget) BudgetResponse {
+        <span class="cov8" title="1">return BudgetResponse{
+                Category: b.Category,
+                Limit:    b.Limit,
+                Period:   b.Period,
+</span>        }
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package api
+
+import (
+        "encoding/json"
+        "errors"
+        "log"
+        "net/http"
+
+        "gateway/internal/ledger"
+)
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+        <span class="cov8" title="1">w.Header().Set("Content-Type", "application/json; charset=utf-8")
+        w.WriteHeader(status)
+        _ = json.NewEncoder(w).Encode(v)
+</span>}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+        <span class="cov8" title="1">writeJSON(w, status, map[string]string{"error": msg})
+</span>}
+
+func CreateTransactionHandler(w http.ResponseWriter, r *http.Request) {
+        <span class="cov8" title="1">var req CreateTransactionRequest
+        if err := json.NewDecoder(r.Body).Decode(&amp;req); err != nil </span>{
+                <span class="cov8" title="1">writeError(w, http.StatusBadRequest, "invalid JSON")
+                return
+</span>        }
+
+        <span class="cov8" title="1">tx, err := req.ToDomain()
+        if err != nil </span>{
+                <span class="cov0" title="0">writeError(w, http.StatusBadRequest, err.Error())
+                return
+</span>        }
+
+        <span class="cov8" title="1">if err := tx.Validate(); err != nil </span>{
+                <span class="cov0" title="0">writeError(w, http.StatusBadRequest, err.Error())
+                return
+</span>        }
+
+        <span class="cov8" title="1">created, err := ledger.AddTransaction(tx)
+        if err != nil </span>{
+                <span class="cov8" title="1">if errors.Is(err, ledger.ErrBudgetExceeded) </span>{
+                        <span class="cov8" title="1">writeError(w, http.StatusConflict, "budget exceeded")
+                        return
+</span>                }
+                <span class="cov0" title="0">log.Printf("AddTransaction: %v", err)
+                writeError(w, http.StatusInternalServerError, "internal server error")
+                return</span>
+        }
+
+        <span class="cov8" title="1">writeJSON(w, http.StatusCreated, FromDomainTransaction(created))</span>
+}
+
+func ListTransactionsHandler(w http.ResponseWriter, r *http.Request) {
+        <span class="cov8" title="1">txs := ledger.ListTransactions()
+        resp := make([]TransactionResponse, 0, len(txs))
+        for _, t := range txs </span>{
+                <span class="cov8" title="1">resp = append(resp, FromDomainTransaction(t))
+</span>        }
+        <span class="cov8" title="1">writeJSON(w, http.StatusOK, resp)</span>
+}
+
+func CreateBudgetHandler(w http.ResponseWriter, r *http.Request) {
+        <span class="cov8" title="1">var req CreateBudgetRequest
+        if err := json.NewDecoder(r.Body).Decode(&amp;req); err != nil </span>{
+                <span class="cov8" title="1">writeError(w, http.StatusBadRequest, "invalid JSON")
+                return
+</span>        }
+
+        <span class="cov8" title="1">b := req.ToDomain()
+        if err := b.Validate(); err != nil </span>{
+                <span class="cov8" title="1">writeError(w, http.StatusBadRequest, err.Error())
+                return
+</span>        }
+
+        <span class="cov8" title="1">if err := ledger.SetBudget(b); err != nil </span>{
+                <span class="cov0" title="0">log.Printf("SetBudget: %v", err)
+                writeError(w, http.StatusInternalServerError, "internal server error")
+                return
+</span>        }
+
+        <span class="cov8" title="1">writeJSON(w, http.StatusCreated, FromDomainBudget(b))</span>
+}
+
+func ListBudgetsHandler(w http.ResponseWriter, r *http.Request) {
+        <span class="cov8" title="1">budgets := ledger.ListBudgets()
+        resp := make([]BudgetResponse, 0, len(budgets))
+        for _, b := range budgets </span>{
+                <span class="cov8" title="1">resp = append(resp, FromDomainBudget(b))
+</span>        }
+        <span class="cov8" title="1">writeJSON(w, http.StatusOK, resp)</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package api
+
+import (
+        "log"
+        "net/http"
+        "time"
+)
+
+func LoggingMiddleware(next http.Handler) http.Handler {
+        <span class="cov8" title="1">return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) </span>{
+                <span class="cov8" title="1">start := time.Now()
+                next.ServeHTTP(w, r)
+                log.Printf("%s %s %v", r.Method, r.URL.Path, time.Since(start))
+</span>        })
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package ledger
+
+import (
+        "encoding/json"
+        "errors"
+        "fmt"
+        "io"
+        "math"
+        "strings"
+        "sync"
+)
+
+type Budget struct {
+        Category string
+        Limit    float64
+        Period   string
+}
+
+var (
+        transactions = make([]Transaction, 0)
+        budgets      = make(map[string]Budget)
+        mu           sync.RWMutex
+)
+
+func (b Budget) Validate() error {
+        <span class="cov8" title="1">if strings.TrimSpace(b.Category) == "" </span>{
+                <span class="cov8" title="1">return errors.New("budget category cannot be empty")
+</span>        }
+
+        <span class="cov8" title="1">if math.IsNaN(b.Limit) || math.IsInf(b.Limit, 0) || b.Limit &lt;= 0 </span>{
+                <span class="cov8" title="1">return errors.New("budget limit must be a finite positive number")
+</span>        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+func SetBudget(b Budget) error {
+        <span class="cov8" title="1">if err := b.Validate(); err != nil </span>{
+                <span class="cov8" title="1">return fmt.Errorf("invalid budget: %w", err)
+</span>        }
+
+        <span class="cov8" title="1">mu.Lock()
+        defer mu.Unlock()
+</span>
+        <span class="cov8" title="1">budgets[b.Category] = b
+        return nil</span>
+}
+
+func ListBudgets() []Budget {
+        <span class="cov8" title="1">mu.RLock()
+        defer mu.RUnlock()
+</span>
+        <span class="cov8" title="1">result := make([]Budget, 0, len(budgets))
+        for _, b := range budgets </span>{
+                <span class="cov8" title="1">result = append(result, b)
+</span>        }
+
+        <span class="cov8" title="1">return result</span>
+}
+
+func LoadBudgets(r io.Reader) error {
+        <span class="cov0" title="0">var loaded []Budget
+</span>
+        <span class="cov0" title="0">if err := json.NewDecoder(r).Decode(&amp;loaded); err != nil </span>{
+                <span class="cov0" title="0">return fmt.Errorf("failed to parse budgets JSON: %w", err)
+</span>        }
+
+        <span class="cov0" title="0">for i, b := range loaded </span>{
+                <span class="cov0" title="0">if err := b.Validate(); err != nil </span>{
+                        <span class="cov0" title="0">return fmt.Errorf("invalid budget at index %d: %w", i, err)
+</span>                }
+        }
+
+        <span class="cov0" title="0">mu.Lock()
+        defer mu.Unlock()
+</span>
+        <span class="cov0" title="0">for _, b := range loaded </span>{
+                <span class="cov0" title="0">budgets[b.Category] = b
+</span>        }
+
+        <span class="cov0" title="0">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package ledger
+
+import (
+        "errors"
+        "fmt"
+        "math"
+        "strings"
+        "time"
+)
+
+type Transaction struct {
+        ID          int
+        Amount      float64
+        Category    string
+        Description string
+        Date        time.Time
+}
+
+func (tx Transaction) Validate() error {
+        <span class="cov8" title="1">if math.IsNaN(tx.Amount) || math.IsInf(tx.Amount, 0) || tx.Amount &lt;= 0 </span>{
+                <span class="cov8" title="1">return errors.New("transaction amount must be a finite positive number")
+</span>        }
+
+        <span class="cov8" title="1">if strings.TrimSpace(tx.Category) == "" </span>{
+                <span class="cov8" title="1">return errors.New("transaction category cannot be empty")
+</span>        }
+
+        <span class="cov8" title="1">if tx.Date.IsZero() </span>{
+                <span class="cov8" title="1">return errors.New("transaction date cannot be empty")
+</span>        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+var ErrBudgetExceeded = errors.New("budget exceeded")
+
+func AddTransaction(tx Transaction) (Transaction, error) {
+        <span class="cov8" title="1">if tx.Date.IsZero() </span>{
+                <span class="cov0" title="0">tx.Date = time.Now()
+</span>        }
+
+        <span class="cov8" title="1">if err := tx.Validate(); err != nil </span>{
+                <span class="cov0" title="0">return Transaction{}, fmt.Errorf("invalid transaction: %w", err)
+</span>        }
+
+        <span class="cov8" title="1">mu.Lock()
+        defer mu.Unlock()
+</span>
+        <span class="cov8" title="1">if b, ok := budgets[tx.Category]; ok </span>{
+                <span class="cov8" title="1">var total float64
+                for _, existing := range transactions </span>{
+                        <span class="cov8" title="1">if existing.Category == tx.Category </span>{
+                                <span class="cov8" title="1">total += existing.Amount
+</span>                        }
+                }
+                <span class="cov8" title="1">if total+tx.Amount &gt; b.Limit </span>{
+                        <span class="cov8" title="1">return Transaction{}, fmt.Errorf(
+                                "%w for %q: total %.2f + amount %.2f &gt; limit %.2f",
+                                ErrBudgetExceeded, tx.Category, total, tx.Amount, b.Limit,
+                        )
+</span>                }
+        }
+
+        <span class="cov8" title="1">tx.ID = len(transactions) + 1
+        transactions = append(transactions, tx)
+</span>
+        <span class="cov8" title="1">return tx, nil</span>
+}
+
+func ListTransactions() []Transaction {
+        <span class="cov8" title="1">mu.RLock()
+        defer mu.RUnlock()
+</span>
+        <span class="cov8" title="1">result := make([]Transaction, len(transactions))
+        copy(result, transactions)
+</span>
+        <span class="cov8" title="1">return result
+</span>}
+
+func Reset() {
+        <span class="cov8" title="1">mu.Lock()
+        defer mu.Unlock()
+        transactions = make([]Transaction, 0)
+        budgets = make(map[string]Budget)
+</span>}
+</pre>
+		
+		<pre class="file" id="file5" style="display: none">package ledger
+
+type Validatable interface {
+        Validate() error
+}
+
+func CheckValid(v Validatable) error {
+        <span class="cov0" title="0">return v.Validate()
+</span>}
+
+var (
+        _ Validatable = Transaction{}
+        _ Validatable = Budget{}
+)
+</pre>
+		
+		<pre class="file" id="file6" style="display: none">package main
+
+import (
+        "log"
+        "net/http"
+
+        "gateway/internal/api"
+        "gateway/internal/ledger"
+)
+
+const serverAddress = ":8080"
+
+func main() {
+        <span class="cov0" title="0">for _, b := range []ledger.Budget{
+                {Category: "Продукты", Limit: 5000, Period: "month"},
+                {Category: "Транспорт", Limit: 1000, Period: "month"},
+</span>        } {
+                <span class="cov0" title="0">if err := ledger.SetBudget(b); err != nil </span>{
+                        <span class="cov0" title="0">log.Fatalf("failed to set default budget: %v", err)
+</span>                }
+        }
+
+        <span class="cov0" title="0">mux := http.NewServeMux()
+        mux.HandleFunc("POST /api/transactions", api.CreateTransactionHandler)
+        mux.HandleFunc("GET /api/transactions", api.ListTransactionsHandler)
+        mux.HandleFunc("POST /api/budgets", api.CreateBudgetHandler)
+        mux.HandleFunc("GET /api/budgets", api.ListBudgetsHandler)
+</span>
+        <span class="cov0" title="0">handler := api.LoggingMiddleware(mux)
+</span>
+        <span class="cov0" title="0">log.Printf("Gateway service started on http://localhost%s", serverAddress)
+        if err := http.ListenAndServe(serverAddress, handler); err != nil </span>{
+                <span class="cov0" title="0">log.Fatalf("gateway server failed: %v", err)
+</span>        }
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

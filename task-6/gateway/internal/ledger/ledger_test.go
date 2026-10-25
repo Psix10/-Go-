@@ -38,70 +38,67 @@ func checkLedgerError(
 ) {
 	t.Helper()
 
-	if expectedErr {
-		if err == nil {
-			t.Fatal("expected error, got nil")
+	if !expectedErr {
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
 		}
-
-		if !strings.Contains(err.Error(), expectedMessage) {
-			t.Fatalf(
-				"unexpected error:\ngot: %q\nwant substring: %q",
-				err.Error(),
-				expectedMessage,
-			)
-		}
-
 		return
 	}
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	if !strings.Contains(err.Error(), expectedMessage) {
+		t.Fatalf(
+			"unexpected error:\ngot: %q\nwant substring: %q",
+			err.Error(),
+			expectedMessage,
+		)
 	}
 }
 
 func TestReset(t *testing.T) {
 	resetTestLedger(t)
 
-	requireBudget(t, Budget{
-		Category: "еда",
-		Limit:    5000,
-	})
-
-	requireBudget(t, Budget{
-		Category: "транспорт",
-		Limit:    1000,
-	})
+	requireBudget(t, Budget{Category: "еда", Limit: 5000})
+	requireBudget(t, Budget{Category: "транспорт", Limit: 1000})
 
 	if _, err := AddTransaction(testTransaction(100, "еда")); err != nil {
 		t.Fatalf("failed to add transaction before Reset: %v", err)
 	}
 
-	if len(ListBudgets()) == 0 {
-		t.Fatal("expected budgets before Reset")
+	if len(ListBudgets()) != 2 {
+		t.Fatal("expected 2 budgets before Reset")
 	}
 
-	if len(ListTransactions()) == 0 {
-		t.Fatal("expected transactions before Reset")
+	if len(ListTransactions()) != 1 {
+		t.Fatal("expected 1 transaction before Reset")
 	}
 
 	Reset()
 
 	if budgets := ListBudgets(); len(budgets) != 0 {
 		t.Errorf(
-			"expected empty budgets after Reset, got %d items",
+			"expected empty budgets after Reset, got %d",
 			len(budgets),
 		)
 	}
 
 	if transactions := ListTransactions(); len(transactions) != 0 {
 		t.Errorf(
-			"expected empty transactions after Reset, got %d items",
+			"expected empty transactions after Reset, got %d",
 			len(transactions),
 		)
 	}
 }
 
 func TestTransactionValidation(t *testing.T) {
+	t.Parallel()
+
+	const amountError = "transaction amount must be a finite positive number"
+	const categoryError = "transaction category cannot be empty"
+
 	testCases := []struct {
 		name        string
 		input       Transaction
@@ -109,58 +106,67 @@ func TestTransactionValidation(t *testing.T) {
 		errMsg      string
 	}{
 		{
-			name:  "valid transaction",
-			input: testTransaction(100, "еда"),
+			"valid transaction",
+			testTransaction(100, "еда"),
+			false,
+			"",
 		},
 		{
-			name:        "zero amount",
-			input:       testTransaction(0, "еда"),
-			expectedErr: true,
-			errMsg:      "transaction amount must be a finite positive number",
+			"zero amount",
+			testTransaction(0, "еда"),
+			true,
+			amountError,
 		},
 		{
-			name:        "negative amount",
-			input:       testTransaction(-100, "еда"),
-			expectedErr: true,
-			errMsg:      "transaction amount must be a finite positive number",
+			"negative amount",
+			testTransaction(-100, "еда"),
+			true,
+			amountError,
 		},
 		{
-			name:        "NaN amount",
-			input:       testTransaction(math.NaN(), "еда"),
-			expectedErr: true,
-			errMsg:      "transaction amount must be a finite positive number",
+			"NaN amount",
+			testTransaction(math.NaN(), "еда"),
+			true,
+			amountError,
 		},
 		{
-			name:        "positive infinity amount",
-			input:       testTransaction(math.Inf(1), "еда"),
-			expectedErr: true,
-			errMsg:      "transaction amount must be a finite positive number",
+			"positive infinity amount",
+			testTransaction(math.Inf(1), "еда"),
+			true,
+			amountError,
 		},
 		{
-			name:        "empty category",
-			input:       testTransaction(100, ""),
-			expectedErr: true,
-			errMsg:      "transaction category cannot be empty",
+			"negative infinity amount",
+			testTransaction(math.Inf(-1), "еда"),
+			true,
+			amountError,
 		},
 		{
-			name:        "whitespace category",
-			input:       testTransaction(100, " \t\n"),
-			expectedErr: true,
-			errMsg:      "transaction category cannot be empty",
+			"empty category",
+			testTransaction(100, ""),
+			true,
+			categoryError,
 		},
 		{
-			name: "zero date",
-			input: Transaction{
-				Amount:   100,
-				Category: "еда",
-			},
-			expectedErr: true,
-			errMsg:      "transaction date cannot be empty",
+			"whitespace category",
+			testTransaction(100, " \t\n"),
+			true,
+			categoryError,
+		},
+		{
+			"zero date",
+			Transaction{Amount: 100, Category: "еда"},
+			true,
+			"transaction date cannot be empty",
 		},
 	}
 
 	for _, tc := range testCases {
+		tc := tc
+
 		t.Run(tc.name, func(st *testing.T) {
+			st.Parallel()
+
 			err := tc.input.Validate()
 			checkLedgerError(st, err, tc.expectedErr, tc.errMsg)
 		})
@@ -168,6 +174,11 @@ func TestTransactionValidation(t *testing.T) {
 }
 
 func TestBudgetValidation(t *testing.T) {
+	t.Parallel()
+
+	const limitError = "budget limit must be a finite positive number"
+	const categoryError = "budget category cannot be empty"
+
 	testCases := []struct {
 		name        string
 		input       Budget
@@ -175,49 +186,61 @@ func TestBudgetValidation(t *testing.T) {
 		errMsg      string
 	}{
 		{
-			name:  "valid budget",
-			input: Budget{Category: "еда", Limit: 5000},
+			"valid budget",
+			Budget{Category: "еда", Limit: 5000},
+			false,
+			"",
 		},
 		{
-			name:        "zero limit",
-			input:       Budget{Category: "еда", Limit: 0},
-			expectedErr: true,
-			errMsg:      "budget limit must be a finite positive number",
+			"zero limit",
+			Budget{Category: "еда", Limit: 0},
+			true,
+			limitError,
 		},
 		{
-			name:        "negative limit",
-			input:       Budget{Category: "еда", Limit: -100},
-			expectedErr: true,
-			errMsg:      "budget limit must be a finite positive number",
+			"negative limit",
+			Budget{Category: "еда", Limit: -100},
+			true,
+			limitError,
 		},
 		{
-			name:        "NaN limit",
-			input:       Budget{Category: "еда", Limit: math.NaN()},
-			expectedErr: true,
-			errMsg:      "budget limit must be a finite positive number",
+			"NaN limit",
+			Budget{Category: "еда", Limit: math.NaN()},
+			true,
+			limitError,
 		},
 		{
-			name:        "positive infinity limit",
-			input:       Budget{Category: "еда", Limit: math.Inf(1)},
-			expectedErr: true,
-			errMsg:      "budget limit must be a finite positive number",
+			"positive infinity limit",
+			Budget{Category: "еда", Limit: math.Inf(1)},
+			true,
+			limitError,
 		},
 		{
-			name:        "empty category",
-			input:       Budget{Category: "", Limit: 5000},
-			expectedErr: true,
-			errMsg:      "budget category cannot be empty",
+			"negative infinity limit",
+			Budget{Category: "еда", Limit: math.Inf(-1)},
+			true,
+			limitError,
 		},
 		{
-			name:        "whitespace category",
-			input:       Budget{Category: " \t\n", Limit: 5000},
-			expectedErr: true,
-			errMsg:      "budget category cannot be empty",
+			"empty category",
+			Budget{Category: "", Limit: 5000},
+			true,
+			categoryError,
+		},
+		{
+			"whitespace category",
+			Budget{Category: " \t\n", Limit: 5000},
+			true,
+			categoryError,
 		},
 	}
 
 	for _, tc := range testCases {
+		tc := tc
+
 		t.Run(tc.name, func(st *testing.T) {
+			st.Parallel()
+
 			err := tc.input.Validate()
 			checkLedgerError(st, err, tc.expectedErr, tc.errMsg)
 		})
@@ -264,10 +287,7 @@ func TestAddTransaction(t *testing.T) {
 
 			for _, initialTx := range tc.initial {
 				if _, err := AddTransaction(initialTx); err != nil {
-					st.Fatalf(
-						"failed to add initial transaction: %v",
-						err,
-					)
+					st.Fatalf("failed to add initial transaction: %v", err)
 				}
 			}
 
@@ -286,7 +306,6 @@ func TestAddTransaction(t *testing.T) {
 						len(transactions),
 					)
 				}
-
 				return
 			}
 
@@ -363,12 +382,8 @@ func TestSetBudget(t *testing.T) {
 
 			if tc.expectedErr {
 				if len(budgets) != 0 {
-					st.Errorf(
-						"invalid budget was saved: got %d budgets",
-						len(budgets),
-					)
+					st.Errorf("invalid budget was saved: %d budgets", len(budgets))
 				}
-
 				return
 			}
 
@@ -407,11 +422,7 @@ func TestListBudgets(t *testing.T) {
 	budgets := ListBudgets()
 
 	if len(budgets) != len(expected) {
-		t.Fatalf(
-			"expected %d budgets, got %d",
-			len(expected),
-			len(budgets),
-		)
+		t.Fatalf("expected %d budgets, got %d", len(expected), len(budgets))
 	}
 
 	for _, budget := range budgets {
@@ -448,10 +459,7 @@ func TestListBudgets(t *testing.T) {
 func TestListTransactions(t *testing.T) {
 	resetTestLedger(t)
 
-	requireBudget(t, Budget{
-		Category: "еда",
-		Limit:    5000,
-	})
+	requireBudget(t, Budget{Category: "еда", Limit: 5000})
 
 	createdTx, err := AddTransaction(testTransaction(100, "еда"))
 	if err != nil {

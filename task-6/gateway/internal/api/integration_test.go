@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"gateway/internal/ledger"
 )
 
 type httpTestCase struct {
@@ -15,6 +17,13 @@ type httpTestCase struct {
 	body                 string
 	expectedStatus       int
 	expectedBodyContains string
+}
+
+func resetAPITestLedger(t *testing.T) {
+	t.Helper()
+
+	ledger.Reset()
+	t.Cleanup(ledger.Reset)
 }
 
 func newTestHandler() http.Handler {
@@ -101,6 +110,30 @@ func requireTestJSONResponse(
 	}
 }
 
+func requireAPIError(
+	t *testing.T,
+	recorder *httptest.ResponseRecorder,
+	expectedMessage string,
+) {
+	t.Helper()
+
+	var response struct {
+		Error string `json:"error"`
+	}
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse error response: %v", err)
+	}
+
+	if !strings.Contains(response.Error, expectedMessage) {
+		t.Fatalf(
+			"unexpected error response:\ngot: %q\nwant substring: %q",
+			response.Error,
+			expectedMessage,
+		)
+	}
+}
+
 func createTestBudget(
 	t *testing.T,
 	handler http.Handler,
@@ -124,6 +157,24 @@ func createTestBudget(
 
 	requireTestStatus(t, recorder, http.StatusCreated)
 	requireTestJSONResponse(t, recorder)
+
+	var response struct {
+		Category string  `json:"category"`
+		Limit    float64 `json:"limit"`
+	}
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse created budget: %v", err)
+	}
+
+	if response.Category != category || response.Limit != limit {
+		t.Fatalf(
+			"unexpected created budget: got %+v, want category=%q limit=%v",
+			response,
+			category,
+			limit,
+		)
+	}
 }
 
 func transactionTestBody(
@@ -139,6 +190,112 @@ func transactionTestBody(
 		"description": "покупка продуктов",
 		"date":        "2024-01-15",
 	})
+}
+
+func requireCreatedTransaction(
+	t *testing.T,
+	recorder *httptest.ResponseRecorder,
+	category string,
+	amount float64,
+) {
+	t.Helper()
+
+	requireTestStatus(t, recorder, http.StatusCreated)
+	requireTestJSONResponse(t, recorder)
+
+	var response struct {
+		Category    string  `json:"category"`
+		Amount      float64 `json:"amount"`
+		Description string  `json:"description"`
+	}
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to parse created transaction: %v", err)
+	}
+
+	if response.Category != category || response.Amount != amount {
+		t.Fatalf(
+			"unexpected created transaction: got %+v, want category=%q amount=%v",
+			response,
+			category,
+			amount,
+		)
+	}
+
+	if response.Description != "покупка продуктов" {
+		t.Errorf("unexpected description: %q", response.Description)
+	}
+}
+
+func requireListedBudget(
+	t *testing.T,
+	recorder *httptest.ResponseRecorder,
+	category string,
+	limit float64,
+) {
+	t.Helper()
+
+	requireTestStatus(t, recorder, http.StatusOK)
+	requireTestJSONResponse(t, recorder)
+
+	var budgets []struct {
+		Category string  `json:"category"`
+		Limit    float64 `json:"limit"`
+	}
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &budgets); err != nil {
+		t.Fatalf("failed to parse budgets: %v", err)
+	}
+
+	for _, budget := range budgets {
+		if budget.Category == category && budget.Limit == limit {
+			return
+		}
+	}
+
+	t.Fatalf(
+		"budget category=%q limit=%v not found in response: %s",
+		category,
+		limit,
+		recorder.Body.String(),
+	)
+}
+
+func requireListedTransaction(
+	t *testing.T,
+	recorder *httptest.ResponseRecorder,
+	category string,
+	amount float64,
+) {
+	t.Helper()
+
+	requireTestStatus(t, recorder, http.StatusOK)
+	requireTestJSONResponse(t, recorder)
+
+	var transactions []struct {
+		Category    string  `json:"category"`
+		Amount      float64 `json:"amount"`
+		Description string  `json:"description"`
+	}
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &transactions); err != nil {
+		t.Fatalf("failed to parse transactions: %v", err)
+	}
+
+	for _, transaction := range transactions {
+		if transaction.Category == category &&
+			transaction.Amount == amount &&
+			transaction.Description == "покупка продуктов" {
+			return
+		}
+	}
+
+	t.Fatalf(
+		"transaction category=%q amount=%v not found in response: %s",
+		category,
+		amount,
+		recorder.Body.String(),
+	)
 }
 
 func runHTTPTestCases(
@@ -161,25 +318,17 @@ func runHTTPTestCases(
 			requireTestStatus(st, recorder, tc.expectedStatus)
 			requireTestJSONResponse(st, recorder)
 
-			if tc.expectedBodyContains != "" &&
-				!strings.Contains(
-					recorder.Body.String(),
-					tc.expectedBodyContains,
-				) {
-				st.Errorf(
-					"response body doesn't contain expected text:\n"+
-						"got: %q\nwant substring: %q",
-					recorder.Body.String(),
-					tc.expectedBodyContains,
-				)
+			if tc.expectedBodyContains != "" {
+				requireAPIError(st, recorder, tc.expectedBodyContains)
 			}
 		})
 	}
 }
 
 func TestCreateBudget(t *testing.T) {
+	resetAPITestLedger(t)
+
 	handler := newTestHandler()
-	category := "еда-" + t.Name()
 
 	testCases := []httpTestCase{
 		{
@@ -187,8 +336,8 @@ func TestCreateBudget(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/api/budgets",
 			body: marshalTestJSON(t, map[string]interface{}{
-				"category": category,
-				"limit":    5000.0,
+				"category": "еда",
+				"limit":    5000,
 			}),
 			expectedStatus: http.StatusCreated,
 		},
@@ -205,24 +354,22 @@ func TestCreateBudget(t *testing.T) {
 			method: http.MethodPost,
 			path:   "/api/budgets",
 			body: marshalTestJSON(t, map[string]interface{}{
-				"category": category + "-zero",
-				"limit":    0.0,
+				"category": "еда-zero",
+				"limit":    0,
 			}),
-			expectedStatus: http.StatusBadRequest,
-			expectedBodyContains: "budget limit must be " +
-				"a finite positive number",
+			expectedStatus:       http.StatusBadRequest,
+			expectedBodyContains: "budget limit must be a finite positive number",
 		},
 		{
 			name:   "negative limit",
 			method: http.MethodPost,
 			path:   "/api/budgets",
 			body: marshalTestJSON(t, map[string]interface{}{
-				"category": category + "-negative",
-				"limit":    -100.0,
+				"category": "еда-negative",
+				"limit":    -100,
 			}),
-			expectedStatus: http.StatusBadRequest,
-			expectedBodyContains: "budget limit must be " +
-				"a finite positive number",
+			expectedStatus:       http.StatusBadRequest,
+			expectedBodyContains: "budget limit must be a finite positive number",
 		},
 	}
 
@@ -230,10 +377,10 @@ func TestCreateBudget(t *testing.T) {
 }
 
 func TestListBudgets(t *testing.T) {
-	handler := newTestHandler()
-	category := "еда-" + t.Name()
+	resetAPITestLedger(t)
 
-	createTestBudget(t, handler, category, 5000)
+	handler := newTestHandler()
+	createTestBudget(t, handler, "еда", 5000)
 
 	recorder := performTestRequest(
 		t,
@@ -243,40 +390,28 @@ func TestListBudgets(t *testing.T) {
 		"",
 	)
 
-	requireTestStatus(t, recorder, http.StatusOK)
-	requireTestJSONResponse(t, recorder)
-
-	var budgets []BudgetResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &budgets); err != nil {
-		t.Fatalf("failed to parse budget response: %v", err)
-	}
-
-	if len(budgets) == 0 {
-		t.Fatal("expected at least one budget in response")
-	}
-
-	requireTestCategory(t, recorder, category)
+	requireListedBudget(t, recorder, "еда", 5000)
 }
 
 func TestCreateTransaction(t *testing.T) {
-	handler := newTestHandler()
-	category := "еда-" + t.Name()
+	resetAPITestLedger(t)
 
-	createTestBudget(t, handler, category, 5000)
+	handler := newTestHandler()
+	createTestBudget(t, handler, "еда", 5000)
 
 	testCases := []httpTestCase{
 		{
 			name:           "valid transaction creation",
 			method:         http.MethodPost,
 			path:           "/api/transactions",
-			body:           transactionTestBody(t, category, 100),
+			body:           transactionTestBody(t, "еда", 100),
 			expectedStatus: http.StatusCreated,
 		},
 		{
 			name:                 "transaction exceeds budget",
 			method:               http.MethodPost,
 			path:                 "/api/transactions",
-			body:                 transactionTestBody(t, category, 6000),
+			body:                 transactionTestBody(t, "еда", 6000),
 			expectedStatus:       http.StatusConflict,
 			expectedBodyContains: "budget exceeded",
 		},
@@ -294,21 +429,20 @@ func TestCreateTransaction(t *testing.T) {
 }
 
 func TestListTransactions(t *testing.T) {
-	handler := newTestHandler()
-	category := "еда-" + t.Name()
+	resetAPITestLedger(t)
 
-	createTestBudget(t, handler, category, 5000)
+	handler := newTestHandler()
+	createTestBudget(t, handler, "еда", 5000)
 
 	createRecorder := performTestRequest(
 		t,
 		handler,
 		http.MethodPost,
 		"/api/transactions",
-		transactionTestBody(t, category, 100),
+		transactionTestBody(t, "еда", 100),
 	)
 
-	requireTestStatus(t, createRecorder, http.StatusCreated)
-	requireTestJSONResponse(t, createRecorder)
+	requireCreatedTransaction(t, createRecorder, "еда", 100)
 
 	listRecorder := performTestRequest(
 		t,
@@ -318,134 +452,101 @@ func TestListTransactions(t *testing.T) {
 		"",
 	)
 
-	requireTestStatus(t, listRecorder, http.StatusOK)
-	requireTestJSONResponse(t, listRecorder)
-
-	var transactions []TransactionResponse
-	if err := json.Unmarshal(
-		listRecorder.Body.Bytes(),
-		&transactions,
-	); err != nil {
-		t.Fatalf("failed to parse transaction response: %v", err)
-	}
-
-	if len(transactions) == 0 {
-		t.Fatal("expected at least one transaction in response")
-	}
-
-	requireTestCategory(t, listRecorder, category)
-}
-
-func requireTestCategory(
-	t *testing.T,
-	recorder *httptest.ResponseRecorder,
-	expectedCategory string,
-) {
-	t.Helper()
-
-	var items []struct {
-		Category string `json:"category"`
-	}
-
-	if err := json.Unmarshal(recorder.Body.Bytes(), &items); err != nil {
-		t.Fatalf("failed to parse response categories: %v", err)
-	}
-
-	for _, item := range items {
-		if item.Category == expectedCategory {
-			return
-		}
-	}
-
-	t.Fatalf(
-		"expected category %q in response, got: %s",
-		expectedCategory,
-		recorder.Body.String(),
-	)
+	requireListedTransaction(t, listRecorder, "еда", 100)
 }
 
 func TestMainSequence(t *testing.T) {
+	resetAPITestLedger(t)
+
 	handler := newTestHandler()
-	category := "еда-" + t.Name()
+	const category = "еда"
 
-	// 1. Создаём бюджет.
-	createTestBudget(t, handler, category, 5000)
-
-	// 2. Создаём транзакцию в пределах бюджета.
-	createRecorder := performTestRequest(
-		t,
-		handler,
-		http.MethodPost,
-		"/api/transactions",
-		transactionTestBody(t, category, 100),
-	)
-
-	requireTestStatus(t, createRecorder, http.StatusCreated)
-	requireTestJSONResponse(t, createRecorder)
-
-	// 3. Проверяем, что созданная транзакция присутствует в списке.
-	listRecorder := performTestRequest(
-		t,
-		handler,
-		http.MethodGet,
-		"/api/transactions",
-		"",
-	)
-
-	requireTestStatus(t, listRecorder, http.StatusOK)
-	requireTestJSONResponse(t, listRecorder)
-	requireTestCategory(t, listRecorder, category)
-
-	// 4. Уже потрачено 100: ещё 5000 должны превысить лимит 5000.
-	conflictRecorder := performTestRequest(
-		t,
-		handler,
-		http.MethodPost,
-		"/api/transactions",
-		transactionTestBody(t, category, 5000),
-	)
-
-	requireTestStatus(t, conflictRecorder, http.StatusConflict)
-	requireTestJSONResponse(t, conflictRecorder)
-
-	var conflictResponse struct {
-		Error string `json:"error"`
+	// Если подготовительный шаг упал, зависимые шаги не запускаем.
+	if !t.Run("create budget", func(st *testing.T) {
+		createTestBudget(st, handler, category, 5000)
+	}) {
+		return
 	}
 
-	if err := json.Unmarshal(
-		conflictRecorder.Body.Bytes(),
-		&conflictResponse,
-	); err != nil {
-		t.Fatalf("failed to parse conflict response: %v", err)
-	}
-
-	if conflictResponse.Error != "budget exceeded" {
-		t.Errorf(
-			"expected error=%q, got %q",
-			"budget exceeded",
-			conflictResponse.Error,
+	if !t.Run("create transaction within budget", func(st *testing.T) {
+		recorder := performTestRequest(
+			st,
+			handler,
+			http.MethodPost,
+			"/api/transactions",
+			transactionTestBody(st, category, 100),
 		)
+
+		requireCreatedTransaction(st, recorder, category, 100)
+	}) {
+		return
 	}
 
-	// 5. Проверяем некорректный JSON.
-	badRequestRecorder := performTestRequest(
-		t,
-		handler,
-		http.MethodPost,
-		"/api/transactions",
-		"{invalid json",
-	)
-
-	requireTestStatus(t, badRequestRecorder, http.StatusBadRequest)
-	requireTestJSONResponse(t, badRequestRecorder)
-
-	if !strings.Contains(
-		badRequestRecorder.Body.String(),
-		"invalid JSON",
-	) {
-		t.Errorf(
-			"expected invalid JSON error, got: %s",
-			badRequestRecorder.Body.String(),
+	t.Run("list transactions", func(st *testing.T) {
+		recorder := performTestRequest(
+			st,
+			handler,
+			http.MethodGet,
+			"/api/transactions",
+			"",
 		)
-	}
+
+		requireListedTransaction(st, recorder, category, 100)
+	})
+
+	t.Run("transaction exceeds budget", func(st *testing.T) {
+		countBefore := len(ledger.ListTransactions())
+
+		// Уже потрачено 100: ещё 5000 превышают лимит 5000.
+		recorder := performTestRequest(
+			st,
+			handler,
+			http.MethodPost,
+			"/api/transactions",
+			transactionTestBody(st, category, 5000),
+		)
+
+		requireTestStatus(st, recorder, http.StatusConflict)
+		requireTestJSONResponse(st, recorder)
+
+		var response struct {
+			Error string `json:"error"`
+		}
+
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			st.Fatalf("failed to parse conflict response: %v", err)
+		}
+
+		if response.Error != "budget exceeded" {
+			st.Errorf(
+				"expected error=%q, got %q",
+				"budget exceeded",
+				response.Error,
+			)
+		}
+
+		countAfter := len(ledger.ListTransactions())
+
+		if countAfter != countBefore {
+			st.Errorf(
+				"rejected transaction changed storage: before=%d, after=%d",
+				countBefore,
+				countAfter,
+			)
+		}
+	})
+
+	t.Run("bad JSON", func(st *testing.T) {
+		recorder := performTestRequest(
+			st,
+			handler,
+			http.MethodPost,
+			"/api/transactions",
+			"{invalid json",
+		)
+
+		requireTestStatus(st, recorder, http.StatusBadRequest)
+		requireTestJSONResponse(st, recorder)
+		requireAPIError(st, recorder, "invalid JSON")
+	})
 }
